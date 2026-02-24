@@ -2,7 +2,7 @@
 ---
 # SAS to PySpark Accelerator
 
-A structured, multi-stage compiler pipeline that converts legacy SAS programs into production-ready PySpark code.
+A structured, multi-stage compiler pipeline that converts legacy SAS programs into PySpark code.
 
 ---
 
@@ -289,12 +289,4 @@ Data Engineering and Platform Modernization
 
 ---
 
-If you would like, I can now:
 
-* Refine this for a GitHub portfolio presentation
-* Rewrite it in a more corporate enterprise tone
-* Convert it into a one-page architecture document
-* Add a “Why this matters” business justification section
-* Create a professional LinkedIn project description based on this
-
-Tell me where you plan to use it.
