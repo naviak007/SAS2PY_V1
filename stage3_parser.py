@@ -36,8 +36,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("stage3")
 
-DOWNLOADS = r"C:\Users\MelissaSebastian\Downloads"
-sys.path.insert(0, DOWNLOADS)
+
 
 from stage2_tokenizer import TokenType, Token, run_stage2
 
@@ -587,11 +586,7 @@ def run_stage3(token_map: dict) -> List:
 
     for block_idx, tokens in token_map.items():
 
-        # Get block_type from first token if available
-        if tokens and hasattr(tokens[0], "block_type"):
-            block_type = tokens[0].block_type
-        else:
-            block_type = "UNKNOWN"
+        block_type = "UNKNOWN"
 
         log.info(f"  Parsing Block {block_idx}: {block_type}")
 
@@ -680,15 +675,33 @@ def save_ast(ast_nodes: List, out_filepath: str):
 # ══════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════
-
 if __name__ == "__main__":
-    STAGE1_CLEANED = os.path.join(DOWNLOADS, "hr_report_stage1_cleaned.sas")
 
-    log.info("Running Stage 2 to get tokens...")
-    token_map = run_stage2(STAGE1_CLEANED)
+    import sys
+    from pathlib import Path
+    from stage1_preprocessor import run_stage1
+    from stage2_tokenizer import run_stage2
 
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage3_parser.py <input_file.sas>\n")
+        sys.exit(1)
+
+    input_sas = sys.argv[1]
+    input_path = Path(input_sas)
+
+    # ── Run Stage 1 ─────────────────────────
+    log.info("Running Stage 1...")
+    stage1_result = run_stage1(input_sas)
+
+    # ── Run Stage 2 ─────────────────────────
+    log.info("Running Stage 2...")
+    token_map = run_stage2(stage1_result.blocks)
+
+    # ── Run Stage 3 ─────────────────────────
     ast_nodes = run_stage3(token_map)
     print_ast(ast_nodes)
 
-    out_path = os.path.join(DOWNLOADS, "hr_report_stage3_ast.txt")
-    save_ast(ast_nodes, out_path)
+    # ── Save AST next to input file ────────
+    output_path = input_path.parent / f"{input_path.stem}_stage3_ast.txt"
+    save_ast(ast_nodes, str(output_path))

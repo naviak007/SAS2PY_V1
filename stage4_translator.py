@@ -32,8 +32,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("stage4")
 
-DOWNLOADS = r"C:\Users\MelissaSebastian\Downloads"
-sys.path.insert(0, DOWNLOADS)
+
 
 from stage2_tokenizer import run_stage2
 from stage3_parser import (
@@ -330,12 +329,34 @@ def run_stage4(ast_nodes: list):
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    STAGE1_CLEANED = os.path.join(DOWNLOADS, "hr_report_stage1_cleaned.sas")
 
+    import sys
+    from pathlib import Path
+    from stage1_preprocessor import run_stage1
+    from stage2_tokenizer import run_stage2
+    from stage3_parser import run_stage3
+
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage4_translator.py <input_file.sas>\n")
+        sys.exit(1)
+
+    input_sas = sys.argv[1]
+    input_path = Path(input_sas)
+
+    # ── Run Stage 1 ─────────────────────────
+    log.info("Running Stage 1...")
+    stage1_result = run_stage1(input_sas)
+
+    # ── Run Stage 2 ─────────────────────────
     log.info("Running Stage 2...")
-    token_map = run_stage2(STAGE1_CLEANED)
+    token_map = run_stage2(stage1_result.blocks)
+
+    # ── Run Stage 3 ─────────────────────────
     log.info("Running Stage 3...")
     ast_nodes = run_stage3(token_map)
+
+    # ── Run Stage 4 ─────────────────────────
     log.info("Running Stage 4...")
     pyspark_code, todo_count = run_stage4(ast_nodes)
 
@@ -344,7 +365,10 @@ if __name__ == "__main__":
     print(f"{'='*60}\n")
     print(pyspark_code)
 
-    out_path = os.path.join(DOWNLOADS, "hr_report_stage4_raw.py")
-    with open(out_path, "w", encoding="utf-8") as f:
+    # ── Save output next to input file ──────
+    output_path = input_path.parent / f"{input_path.stem}_stage4_raw.py"
+
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(pyspark_code)
-    log.info(f"Raw PySpark saved to: {out_path}")
+
+    log.info(f"Raw PySpark saved to: {output_path}")

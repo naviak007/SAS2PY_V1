@@ -277,31 +277,34 @@ def print_tokens(token_map: dict, blocks=None, max_tokens: int = 60):
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+
     import sys
-    import os
+    from pathlib import Path
 
-    # ── Locate the Stage 1 script ─────────────────────────────
-    # Both files must be in the same folder (Downloads)
-    DOWNLOADS = r"C:\Users\MelissaSebastian\Downloads"
-    sys.path.insert(0, DOWNLOADS)
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage2_tokenizer.py <input_file.sas>\n")
+        sys.exit(1)
 
-    # ── Import and run Stage 1 first ──────────────────────────
+    input_sas = sys.argv[1]
+
+    # Import Stage 1 normally (assumes same folder / package structure)
     from stage1_preprocessor import run_stage1
 
-    SAS_FILE = r"C:\Users\MelissaSebastian\Downloads\hr_report.sas"
+    print("\nRunning Stage 1 to generate clean blocks...")
+    stage1_result = run_stage1(input_sas)
 
-    print("\nRunning Stage 1 first to get clean blocks...")
-    stage1_result = run_stage1(SAS_FILE)
-
-    # ── Run Stage 2 on the Stage 1 output ─────────────────────
+    # Run Stage 2
     token_map = run_stage2(stage1_result.blocks)
 
-    # ── Print results ──────────────────────────────────────────
+    # Print results
     print_tokens(token_map, blocks=stage1_result.blocks)
 
-    # ── Save token listing to file ────────────────────────────
-    out_path = os.path.join(DOWNLOADS, "hr_report_stage2_tokens.txt")
-    with open(out_path, "w", encoding="utf-8") as f:
+    # Save token listing next to input file
+    input_path = Path(input_sas)
+    output_path = input_path.parent / f"{input_path.stem}_stage2_tokens.txt"
+
+    with open(output_path, "w", encoding="utf-8") as f:
         for block_idx, tokens in token_map.items():
             block_type = stage1_result.blocks[block_idx - 1].block_type
             f.write(f"\n[Block {block_idx}] {block_type}\n")
@@ -311,4 +314,4 @@ if __name__ == "__main__":
                 val = str(tok.value) if tok.value is not None else "(None)"
                 f.write(f"  {tok.type.name:<18} {val:<30} {tok.line}\n")
 
-    log.info(f"Token listing saved to: {out_path}")
+    log.info(f"Token listing saved to: {output_path}")

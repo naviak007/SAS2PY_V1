@@ -36,8 +36,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("stage5")
 
-DOWNLOADS = r"C:\Users\MelissaSebastian\Downloads"
-sys.path.insert(0, DOWNLOADS)
 
 from stage2_tokenizer import run_stage2
 from stage3_parser    import run_stage3
@@ -177,11 +175,12 @@ def format_code(code: str) -> str:
 # ══════════════════════════════════════════════════════════════
 
 def run_stage5(
-    raw_code:    str,
-    source_file: str,
-    block_count: int,
-    todo_count:  int,
-    out_dir:     str,
+    raw_code:        str,
+    source_file:     str,
+    block_count:     int,
+    todo_count:      int,
+    out_dir:         str,
+    output_filename: str = None,
 ) -> dict:
     """
     Clean, enrich, format, and write the final PySpark script.
@@ -226,7 +225,10 @@ def run_stage5(
     full_code = format_code(full_code)
 
     # Step 7: Write file
-    out_path = Path(out_dir) / f"{app_name}_stage5_final.py"
+    if output_filename:
+        out_path = Path(out_dir) / output_filename
+    else:
+        out_path = Path(out_dir) / f"{app_name}_stage5_final.py"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(full_code, encoding="utf-8")
     file_size = out_path.stat().st_size
@@ -255,21 +257,45 @@ def run_stage5(
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    STAGE1_CLEANED = os.path.join(DOWNLOADS, "hr_report_stage1_cleaned.sas")
+
+    import sys
+    from pathlib import Path
+    from stage1_preprocessor import run_stage1
+    from stage2_tokenizer import run_stage2
+    from stage3_parser import run_stage3
+    from stage4_translator import run_stage4
+
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage5_postprocessor.py <input_file.sas>\n")
+        sys.exit(1)
+
+    input_sas = sys.argv[1]
+    input_path = Path(input_sas)
+
+    # ── Run full pipeline up to Stage 4 ─────────────────
+    log.info("Running Stage 1...")
+    stage1_result = run_stage1(input_sas)
 
     log.info("Running Stage 2...")
-    token_map = run_stage2(STAGE1_CLEANED)
+    token_map = run_stage2(stage1_result.blocks)
+
     log.info("Running Stage 3...")
     ast_nodes = run_stage3(token_map)
+
     log.info("Running Stage 4...")
     raw_code, todo_count = run_stage4(ast_nodes)
-    log.info("Running Stage 5...")
+
+    # ── Stage 5 ─────────────────────────────────────────
+    output_filename = f"{input_path.stem}_Converted.py"
+
     metadata, final_code = run_stage5(
-        raw_code    = raw_code,
-        source_file = STAGE1_CLEANED,
-        block_count = len(ast_nodes),
-        todo_count  = todo_count,
-        out_dir     = DOWNLOADS,
+        raw_code        = raw_code,
+        source_file     = input_sas,
+        block_count     = len(ast_nodes),
+        todo_count      = todo_count,
+        out_dir         = str(input_path.parent),
+        output_filename = output_filename,
     )
 
     print(f"\n{'='*60}")
@@ -277,8 +303,9 @@ if __name__ == "__main__":
     print(f"{'='*60}\n")
     print(final_code)
 
-    # Save metadata JSON for Stage 6
-    meta_path = os.path.join(DOWNLOADS, "hr_report_stage5_metadata.json")
-    with open(meta_path, "w") as f:
+    # Save metadata JSON next to output file
+    meta_path = input_path.parent / f"{input_path.stem}_stage5_metadata.json"
+    with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
+
     log.info(f"Metadata saved to: {meta_path}")

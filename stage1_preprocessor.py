@@ -325,13 +325,22 @@ def print_result(result: PreProcessorResult):
 # ── Entry point ───────────────────────────────────────────────
 
 if __name__ == "__main__":
-    SAS_FILE = r"C:\Users\MelissaSebastian\Downloads\hr_report.sas"
 
-    result = run_stage1(SAS_FILE)
+    import sys
+
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage1_preprocessor.py <input_file.sas>\n")
+        sys.exit(1)
+
+    input_sas = sys.argv[1]
+
+    result = run_stage1(input_sas)
     print_result(result)
 
-    # Save cleaned output for inspection
-    out_path = Path(r"C:\Users\MelissaSebastian\Downloads\hr_report_stage1_cleaned.sas")
-    out_path.parent.mkdir(parents=True, exist_ok=True)  # creates folder if missing
-    out_path.write_text(result.cleaned_text, encoding="utf-8")
-    log.info(f"Cleaned SAS written to: {out_path}")
+    # Save cleaned output next to input file
+    input_path = Path(input_sas)
+    output_path = input_path.parent / f"{input_path.stem}_stage1_cleaned.sas"
+
+    output_path.write_text(result.cleaned_text, encoding="utf-8")
+    log.info(f"Cleaned SAS written to: {output_path}")

@@ -165,36 +165,60 @@ def print_report(report: ValidationReport):
 
 if __name__ == "__main__":
 
-    input_sas = os.path.join(BASE_DIR, "hr_report_stage1_cleaned.sas")
+    import sys
+    from pathlib import Path
 
-    # Stage 1
-    log.info("Running Stage 1...")
-    stage1_result = run_stage1(input_sas)
+    if len(sys.argv) != 2:
+        print("\nUsage:")
+        print("  python stage6_validator.py <input_file.sas>\n")
+        sys.exit(1)
 
-    # Stage 2
-    log.info("Running Stage 2...")
+    input_sas = Path(sys.argv[1]).resolve()
+
+    if not input_sas.exists():
+        print(f"\nError: File not found -> {input_sas}\n")
+        sys.exit(1)
+
+    if input_sas.suffix.lower() != ".sas":
+        print("\nError: Input must be a .sas file\n")
+        sys.exit(1)
+
+    log.info("=" * 60)
+    log.info("SAS → PySpark Accelerator (Full Pipeline)")
+    log.info("=" * 60)
+    log.info(f"Input : {input_sas.name}")
+    log.info(f"Folder: {input_sas.parent}")
+
+    # ── Stage 1
+    stage1_result = run_stage1(str(input_sas))
+
+    # ── Stage 2
     token_map = run_stage2(stage1_result.blocks)
 
-    # Stage 3
-    log.info("Running Stage 3...")
+    # ── Stage 3
     ast_nodes = run_stage3(token_map)
 
-    # Stage 4
-    log.info("Running Stage 4...")
+    # ── Stage 4
     raw_code, todo_count = run_stage4(ast_nodes)
 
-    # Stage 5
-    log.info("Running Stage 5...")
+    # ── Stage 5
+    output_filename = f"{input_sas.stem}_Converted.py"
+
     metadata, _ = run_stage5(
-        raw_code=raw_code,
-        source_file=stage1_result.source_file,
-        block_count=len(stage1_result.blocks),
-        todo_count=todo_count,
-        out_dir=BASE_DIR,
+        raw_code        = raw_code,
+        source_file     = str(input_sas),
+        block_count     = len(ast_nodes),
+        todo_count      = todo_count,
+        out_dir         = str(input_sas.parent),
+        output_filename = output_filename,
     )
 
-    # Stage 6
+    # ── Stage 6
     py_file = metadata["output_file"]
-    report = run_stage6(py_file, BASE_DIR)
+    report  = run_stage6(py_file, str(input_sas.parent))
 
     print_report(report)
+
+    log.info("=" * 60)
+    log.info("Pipeline completed successfully.")
+    log.info("=" * 60)
