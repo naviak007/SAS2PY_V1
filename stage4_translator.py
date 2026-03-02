@@ -85,13 +85,24 @@ FUNCTION_MAP = {
 
 def translate_expr(expr: str, imports: set) -> str:
     """
-    1. Replace SAS function names with PySpark equivalents.
-    2. Wrap bare column identifiers in col("...").
-    3. Translate SAS operators (^= → !=, EQ → ==, etc.)
+    Convert SAS expression into PySpark-safe expression.
+    - Replace SAS operators
+    - Replace function names
+    - Wrap identifiers with col("...")
+    - Preserve string literals
     """
+
     result = expr
 
-    # Swap SAS operators to Python equivalents
+    # ─────────────────────────────────────────
+    # 1. Replace comparison '=' with '=='
+    #    but DO NOT affect >=, <=, !=
+    # ─────────────────────────────────────────
+    result = re.sub(r"(?<![<>!=])=(?!=)", "==", result)
+
+    # ─────────────────────────────────────────
+    # 2. Replace SAS word operators
+    # ─────────────────────────────────────────
     OPERATOR_MAP = {
         r"\^=": "!=",
         r"\bNE\b": "!=",
@@ -101,19 +112,68 @@ def translate_expr(expr: str, imports: set) -> str:
         r"\bGE\b": ">=",
         r"\bLE\b": "<=",
         r"\bAND\b": "&",
-        r"\bOR\b":  "|",
+        r"\bOR\b": "|",
         r"\bNOT\b": "~",
     }
+
     for sas_op, py_op in OPERATOR_MAP.items():
         result = re.sub(sas_op, py_op, result, flags=re.IGNORECASE)
 
-    # Swap SAS function names
+    # ─────────────────────────────────────────
+    # 3. Replace SAS function names
+    # ─────────────────────────────────────────
     for sas_fn, (spark_fn, module) in FUNCTION_MAP.items():
         pattern = re.compile(rf"\b{sas_fn}\s*\(", re.IGNORECASE)
         if pattern.search(result):
             result = pattern.sub(f"{spark_fn}(", result)
-            short_name = spark_fn
-            imports.add(f"from {module} import {short_name}")
+            imports.add(f"from {module} import {spark_fn}")
+
+    # ─────────────────────────────────────────
+    # 4. Wrap column identifiers safely
+    # ─────────────────────────────────────────
+
+    # Protect string literals first
+    string_pattern = r"('.*?'|\".*?\")"
+    strings = {}
+
+    def protect_string(match):
+        key = f"__STR_{len(strings)}__"
+        strings[key] = match.group(0)
+        return key
+
+    result = re.sub(string_pattern, protect_string, result)
+
+    # Only wrap identifiers that are NOT:
+    # - numbers
+    # - protected strings
+    # - already inside col()
+    # - function names
+    def wrap_identifier(match):
+        word = match.group(0)
+
+        # Skip numbers
+        if re.fullmatch(r"\d+(\.\d+)?", word):
+            return word
+
+        # Skip protected strings
+        if word.startswith("__STR_"):
+            return word
+
+        # Skip Python literals
+        if word in {"True", "False", "None"}:
+            return word
+
+        # Skip Spark functions (already converted)
+        if word in {v[0] for v in FUNCTION_MAP.values()}:
+            return word
+
+        return f'col("{word}")'
+
+    result = re.sub(r"\b[A-Za-z_][A-Za-z0-9_]*\b", wrap_identifier, result)
+
+    # Restore string literals
+    for key, value in strings.items():
+        result = result.replace(key, value)
 
     imports.add("from pyspark.sql.functions import col")
     return result
@@ -144,7 +204,7 @@ def translate_DataStepNode(node: DataStepNode, imports: set) -> str:
     # WHERE → .filter()
     for condition in node.where:
         expr = translate_expr(condition, imports)
-        lines.append(f'    .filter("{expr}")')
+        lines.append(f'    .filter(({expr}))')
 
     # DROP → .drop()
     for col_name in node.drop:
