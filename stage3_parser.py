@@ -108,6 +108,26 @@ class ProcSqlNode:
     raw_sql:      str   # full SELECT preserved for spark.sql()
 
 
+@dataclass
+class TodoBlockNode:
+    """
+    Represents an unsupported SAS block.
+    The block is preserved in raw form for manual conversion.
+    """
+    block_type: str
+    raw_block: str
+
+    def __repr__(self):
+        return (
+            f"\n# ── UNSUPPORTED: {self.block_type}\n"
+            f"# TODO: manual conversion required\n"
+            f"# RAW BLOCK:\n"
+            f"{self.raw_block}\n"
+        )
+
+
+
+
 # ══════════════════════════════════════════════════════════════
 # STEP 2 — Parser class  (peek / eat helpers)
 # ══════════════════════════════════════════════════════════════
@@ -228,8 +248,14 @@ class Parser:
             elif proc_name == "SQL":
                 return self.parse_proc_sql()
             else:
-                log.warning(f"  Unsupported PROC: {proc_name} — flagged as TODO")
-                return None
+                raw_text = " ".join(
+                str(t.value) for t in self.tokens if t.value is not None
+                )
+                return TodoBlockNode(
+                block_type=kw,
+                raw_text=" ".join(str(t.value) for t in self.tokens if t.value)
+                )
+
 
         log.warning(f"  Unknown block keyword: {kw}")
         return None
@@ -586,7 +612,11 @@ def run_stage3(token_map: dict) -> List:
 
     for block_idx, tokens in token_map.items():
 
-        block_type = "UNKNOWN"
+        # Get block_type from first token if available
+        if tokens and hasattr(tokens[0], "block_type"):
+            block_type = tokens[0].block_type
+        else:
+            block_type = "UNKNOWN"
 
         log.info(f"  Parsing Block {block_idx}: {block_type}")
 
@@ -659,6 +689,11 @@ def print_ast(ast_nodes: List):
                 pass
             print(f"    {node.raw_sql[:200]}...")
 
+        elif isinstance(node, TodoBlockNode):
+            print(f"  TODO Block Type : {node.block_type}")
+            print(f"  Raw Text        : {node.raw_text[:200]}...")
+
+
     print(f"\n{'='*60}\n")
 
 
@@ -675,33 +710,21 @@ def save_ast(ast_nodes: List, out_filepath: str):
 # ══════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════
-if __name__ == "__main__":
 
-    import sys
-    from pathlib import Path
+"""if __name__ == "__main__":
     from stage1_preprocessor import run_stage1
-    from stage2_tokenizer import run_stage2
 
-    if len(sys.argv) != 2:
-        print("\nUsage:")
-        print("  python stage3_parser.py <input_file.sas>\n")
-        sys.exit(1)
+    SOURCE_FILE = os.path.join(DOWNLOADS, "hr_report.sas")
 
-    input_sas = sys.argv[1]
-    input_path = Path(input_sas)
-
-    # ── Run Stage 1 ─────────────────────────
     log.info("Running Stage 1...")
-    stage1_result = run_stage1(input_sas)
+    stage1_result = run_stage1(SOURCE_FILE)
 
-    # ── Run Stage 2 ─────────────────────────
     log.info("Running Stage 2...")
     token_map = run_stage2(stage1_result.blocks)
 
-    # ── Run Stage 3 ─────────────────────────
     ast_nodes = run_stage3(token_map)
     print_ast(ast_nodes)
 
-    # ── Save AST next to input file ────────
-    output_path = input_path.parent / f"{input_path.stem}_stage3_ast.txt"
-    save_ast(ast_nodes, str(output_path))
+    out_path = os.path.join(DOWNLOADS, "hr_report_stage3_ast.txt")
+    save_ast(ast_nodes, out_path)
+"""

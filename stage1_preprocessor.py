@@ -42,12 +42,6 @@ class SASBlock:
     source_file: str = ""
 
 
-
-
-
-
-
-
 @dataclass
 class PreProcessorResult:
     """Everything Stage 1 produces for Stage 2."""
@@ -105,25 +99,26 @@ def strip_comments(source: str) -> str:
 
 def resolve_includes(source: str, base_dir: str, warnings: List[str]) -> str:
     """
-    Replace  %INCLUDE 'path/to/file.sas';  with the file's content.
-    If the file does not exist, leave a comment and record a warning.
+    Instead of inlining %INCLUDE files, replace each occurrence with a
+    placeholder comment that Stage 2+ can convert into a PySpark function call.
+
+    e.g.  %INCLUDE 'hr_utils.sas';
+          becomes
+          # PYSPARK_CALL: hr_utils()
     """
     pattern = re.compile(r"%INCLUDE\s+['\"](.+?)['\"];", re.IGNORECASE)
 
     def replacer(match):
-        inc_path = Path(base_dir) / match.group(1)
-        if inc_path.exists():
-            log.info(f"  [Step 3] Inlining %INCLUDE: {inc_path.name}")
-            return inc_path.read_text(encoding="utf-8")
-        else:
-            msg = f"%INCLUDE not resolved (file not found): {match.group(1)}"
-            warnings.append(msg)
-            log.warning(f"  [Step 3] {msg}")
-            return f"/* INCLUDE_NOT_FOUND: {match.group(1)} */"
+        raw_path = match.group(1)                         # e.g. 'utils/hr_utils.sas'
+        func_name = Path(raw_path).stem                   # e.g. 'hr_utils'
+        placeholder = f"# PYSPARK_CALL: {func_name}()"
+        log.info(f"  [Step 3] %INCLUDE '{raw_path}' → placeholder: {placeholder}")
+        return placeholder
 
     result = pattern.sub(replacer, source)
+
     includes_found = len(pattern.findall(source))
-    log.info(f"  [Step 3] %INCLUDE statements processed: {includes_found}")
+    log.info(f"  [Step 3] %INCLUDE statements converted to placeholders: {includes_found}")
     return result
 
 
@@ -243,6 +238,55 @@ def split_into_blocks(source: str, source_file: str) -> List[SASBlock]:
     return blocks
 
 
+
+# ── Save result to file ───────────────────────────────────────
+
+def save_result_to_file(result: PreProcessorResult, output_path: str):
+    """
+    Save Stage 1 result to a text file.
+    If file exists → overwrite.
+    If not → create new file.
+    """
+
+    output_file = Path(output_path)
+
+    lines = []
+    SEP = "─" * 55
+
+    lines.append(f"{'═'*55}")
+    lines.append(f"STAGE 1 RESULTS — {Path(result.source_file).name}")
+    lines.append(f"{'═'*55}\n")
+
+    # Macro table
+    lines.append(f"MACRO SYMBOL TABLE ({len(result.symbol_table)} variables)")
+    lines.append(SEP)
+    for name, value in result.symbol_table.items():
+        lines.append(f"&{name:<20} = '{value}'")
+
+    lines.append("\n")
+
+    # Blocks
+    lines.append(f"EXTRACTED BLOCKS ({len(result.blocks)} total)")
+    lines.append(SEP)
+
+    for block in result.blocks:
+        lines.append(f"\n[{block.index}] {block.block_type}")
+        lines.append("─" * 50)
+        lines.append(block.raw_text)
+        lines.append("\n")
+
+    # Warnings
+    if result.warnings:
+        lines.append(f"\nWARNINGS ({len(result.warnings)})")
+        lines.append(SEP)
+        for w in result.warnings:
+            lines.append(f"• {w}")
+
+    # Write file (overwrite mode)
+    output_file.write_text("\n".join(lines), encoding="utf-8")
+
+    log.info(f"[OUTPUT] Stage 1 result saved to: {output_file}")
+
 # ── MAIN: Pre-Processor orchestrator ─────────────────────────
 
 def run_stage1(sas_filepath: str) -> PreProcessorResult:
@@ -280,6 +324,19 @@ def run_stage1(sas_filepath: str) -> PreProcessorResult:
     log.info(f"Stage 1 complete  |  {len(blocks)} blocks  |  {len(warnings)} warnings")
     log.info("=" * 55)
 
+    output_filename = path.stem + "_stage1_output.txt"
+    save_result_to_file(
+        PreProcessorResult(
+            source_file   = str(path),
+            original_text = original,
+            cleaned_text  = cleaned,
+            symbol_table  = dict(symbol_table),
+            blocks        = blocks,
+            warnings      = warnings,
+        ),
+        output_filename
+    )
+    
     return PreProcessorResult(
         source_file   = str(path),
         original_text = original,
@@ -299,12 +356,12 @@ def print_result(result: PreProcessorResult):
     print(f"  STAGE 1 RESULTS — {Path(result.source_file).name}")
     print(f"{'═'*55}")
 
-    print(f"\n📌 MACRO SYMBOL TABLE ({len(result.symbol_table)} variables)")
+    print(f"\n MACRO SYMBOL TABLE ({len(result.symbol_table)} variables)")
     print(SEP)
     for name, value in result.symbol_table.items():
         print(f"  &{name:<20} = '{value}'")
 
-    print(f"\n📦 EXTRACTED BLOCKS ({len(result.blocks)} total)")
+    print(f"\n EXTRACTED BLOCKS ({len(result.blocks)} total)")
     print(SEP)
     for block in result.blocks:
         print(f"\n  [{block.index}] {block.block_type}")
@@ -314,7 +371,7 @@ def print_result(result: PreProcessorResult):
                 print(f"    {line}")
 
     if result.warnings:
-        print(f"\n⚠️  WARNINGS ({len(result.warnings)})")
+        print(f"\n  WARNINGS ({len(result.warnings)})")
         print(SEP)
         for w in result.warnings:
             print(f"  • {w}")
@@ -322,25 +379,13 @@ def print_result(result: PreProcessorResult):
     print(f"\n{'═'*55}\n")
 
 
-# ── Entry point ───────────────────────────────────────────────
-
-if __name__ == "__main__":
-
+"""if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) != 2:
-        print("\nUsage:")
-        print("  python stage1_preprocessor.py <input_file.sas>\n")
+    if len(sys.argv) < 2:
+        print("Usage: python stage1_preprocessor.py <sas_file>")
         sys.exit(1)
 
-    input_sas = sys.argv[1]
-
-    result = run_stage1(input_sas)
-    print_result(result)
-
-    # Save cleaned output next to input file
-    input_path = Path(input_sas)
-    output_path = input_path.parent / f"{input_path.stem}_stage1_cleaned.sas"
-
-    output_path.write_text(result.cleaned_text, encoding="utf-8")
-    log.info(f"Cleaned SAS written to: {output_path}")
+    sas_file = sys.argv[1]
+    result = run_stage1(sas_file)
+    """
