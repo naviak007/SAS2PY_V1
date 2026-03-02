@@ -1,434 +1,141 @@
 """
 =============================================================
-SAS to PySpark Accelerator — Stage 4: Translator
-=============================================================
-INPUT  : AST nodes from Stage 3 (run_stage3)
-OUTPUT : Raw PySpark code string  →  hr_report_stage4_raw.py
-
-Run order:
-  stage1  →  stage2  →  stage3  →  stage4_translator.py
-
-Sub-steps:
-  1. FUNCTION_MAP  — SAS built-in → PySpark equivalent
-  2. translate_expr()  — swap SAS functions in expressions
-  3. translate_DataStepNode()
-  4. translate_ProcSortNode()
-  5. translate_ProcMeansNode()
-  6. translate_ProcSqlNode()
-  7. isinstance() visitor dispatch + import accumulation
-  8. Return assembled PySpark code string to Stage 5
+SAS to PySpark Accelerator — Stage 4: Translator (Full)
+Expression AST Code Generator
 =============================================================
 """
 
-import os
-import re
-import sys
 import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  [%(levelname)s]  %(message)s",
-    datefmt="%H:%M:%S",
+from stage3_parser import (
+    LiteralNode,
+    IdentifierNode,
+    UnaryOpNode,
+    BinaryOpNode,
+    FunctionCallNode,
+    InOpNode,
+    BetweenOpNode,
+    DataStepNode,
 )
+
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("stage4")
 
 
-
-from stage2_tokenizer import run_stage2
-from stage3_parser import (
-    run_stage3,
-    DataStepNode, ProcSortNode, ProcMeansNode, ProcSqlNode,
-    AssignNode, IfThenNode, ExprNode,
-)
-
-
-# ══════════════════════════════════════════════════════════════
-# STEP 1 — SAS → PySpark Function Map
-# key   : SAS function name (UPPER)
-# value : (pyspark_function_name, [import_module])
-# ══════════════════════════════════════════════════════════════
-
 FUNCTION_MAP = {
-    # String
-    "UPCASE":   ("upper",        "pyspark.sql.functions"),
-    "LOWCASE":  ("lower",        "pyspark.sql.functions"),
-    "STRIP":    ("trim",         "pyspark.sql.functions"),
-    "SUBSTR":   ("substring",    "pyspark.sql.functions"),
-    "LENGTH":   ("length",       "pyspark.sql.functions"),
-    "CATS":     ("concat",       "pyspark.sql.functions"),
-    "CAT":      ("concat",       "pyspark.sql.functions"),
-    "SCAN":     ("split",        "pyspark.sql.functions"),
-    "COMPRESS": ("regexp_replace","pyspark.sql.functions"),
-    # Date
-    "TODAY":    ("current_date", "pyspark.sql.functions"),
-    "YEAR":     ("year",         "pyspark.sql.functions"),
-    "MONTH":    ("month",        "pyspark.sql.functions"),
-    "DAY":      ("dayofmonth",   "pyspark.sql.functions"),
-    "MDY":      ("make_date",    "pyspark.sql.functions"),
-    "DATEPART": ("to_date",      "pyspark.sql.functions"),
-    # Numeric
-    "INT":      ("floor",        "pyspark.sql.functions"),
-    "ABS":      ("abs",          "pyspark.sql.functions"),
-    "ROUND":    ("round",        "pyspark.sql.functions"),
-    "CEIL":     ("ceil",         "pyspark.sql.functions"),
-    "SQRT":     ("sqrt",         "pyspark.sql.functions"),
-    "LOG":      ("log",          "pyspark.sql.functions"),
-    "MAX":      ("greatest",     "pyspark.sql.functions"),
-    "MIN":      ("least",        "pyspark.sql.functions"),
+    "UPCASE": "upper",
+    "LOWCASE": "lower",
+    "ABS": "abs",
+    "ROUND": "round",
 }
 
 
-# ══════════════════════════════════════════════════════════════
-# STEP 2 — translate_expr()
-# Substitute SAS function names and wrap column refs in col()
-# ══════════════════════════════════════════════════════════════
+def generate_expr(node, imports):
 
-def translate_expr(expr: str, imports: set) -> str:
-    """
-    Convert SAS expression into PySpark-safe expression.
-    - Replace SAS operators
-    - Replace function names
-    - Wrap identifiers with col("...")
-    - Preserve string literals
-    """
+    if isinstance(node, LiteralNode):
+        return repr(node.value)
 
-    result = expr
+    if isinstance(node, IdentifierNode):
+        imports.add("from pyspark.sql.functions import col")
+        return f'col("{node.name}")'
 
-    # ─────────────────────────────────────────
-    # 1. Replace comparison '=' with '=='
-    #    but DO NOT affect >=, <=, !=
-    # ─────────────────────────────────────────
-    result = re.sub(r"(?<![<>!=])=(?!=)", "==", result)
+    if isinstance(node, UnaryOpNode):
+        operand = generate_expr(node.operand, imports)
+        if node.operator == "NOT":
+            return f"(~{operand})"
+        return f"(-{operand})"
 
-    # ─────────────────────────────────────────
-    # 2. Replace SAS word operators
-    # ─────────────────────────────────────────
-    OPERATOR_MAP = {
-        r"\^=": "!=",
-        r"\bNE\b": "!=",
-        r"\bEQ\b": "==",
-        r"\bGT\b": ">",
-        r"\bLT\b": "<",
-        r"\bGE\b": ">=",
-        r"\bLE\b": "<=",
-        r"\bAND\b": "&",
-        r"\bOR\b": "|",
-        r"\bNOT\b": "~",
-    }
+    if isinstance(node, BinaryOpNode):
+        left = generate_expr(node.left, imports)
+        right = generate_expr(node.right, imports)
 
-    for sas_op, py_op in OPERATOR_MAP.items():
-        result = re.sub(sas_op, py_op, result, flags=re.IGNORECASE)
+        OP_MAP = {
+            "=": "==",
+            "EQ": "==",
+            "NE": "!=",
+            "^=": "!=",
+            "GT": ">",
+            "LT": "<",
+            "GE": ">=",
+            "LE": "<=",
+            "AND": "&",
+            "OR": "|",
+        }
 
-    # ─────────────────────────────────────────
-    # 3. Replace SAS function names
-    # ─────────────────────────────────────────
-    for sas_fn, (spark_fn, module) in FUNCTION_MAP.items():
-        pattern = re.compile(rf"\b{sas_fn}\s*\(", re.IGNORECASE)
-        if pattern.search(result):
-            result = pattern.sub(f"{spark_fn}(", result)
-            imports.add(f"from {module} import {spark_fn}")
+        op = OP_MAP.get(node.operator, node.operator)
+        return f"({left} {op} {right})"
 
-    # ─────────────────────────────────────────
-    # 4. Wrap column identifiers safely
-    # ─────────────────────────────────────────
+    if isinstance(node, InOpNode):
+        expr = generate_expr(node.expr, imports)
+        values = ", ".join(generate_expr(v, imports) for v in node.values)
+        return f"{expr}.isin({values})"
 
-    # Protect string literals first
-    string_pattern = r"('.*?'|\".*?\")"
-    strings = {}
+    if isinstance(node, BetweenOpNode):
+        expr = generate_expr(node.expr, imports)
+        low = generate_expr(node.low, imports)
+        high = generate_expr(node.high, imports)
+        return f"(({expr} >= {low}) & ({expr} <= {high}))"
 
-    def protect_string(match):
-        key = f"__STR_{len(strings)}__"
-        strings[key] = match.group(0)
-        return key
+    if isinstance(node, FunctionCallNode):
+        name = node.name.upper()
 
-    result = re.sub(string_pattern, protect_string, result)
+        if name == "MISSING":
+            expr = generate_expr(node.args[0], imports)
+            return f"{expr}.isNull()"
 
-    # Only wrap identifiers that are NOT:
-    # - numbers
-    # - protected strings
-    # - already inside col()
-    # - function names
-    def wrap_identifier(match):
-        word = match.group(0)
+        spark_fn = FUNCTION_MAP.get(name)
+        if spark_fn:
+            imports.add(f"from pyspark.sql.functions import {spark_fn}")
+            args = ", ".join(generate_expr(a, imports) for a in node.args)
+            return f"{spark_fn}({args})"
 
-        # Skip numbers
-        if re.fullmatch(r"\d+(\.\d+)?", word):
-            return word
-
-        # Skip protected strings
-        if word.startswith("__STR_"):
-            return word
-
-        # Skip Python literals
-        if word in {"True", "False", "None"}:
-            return word
-
-        # Skip Spark functions (already converted)
-        if word in {v[0] for v in FUNCTION_MAP.values()}:
-            return word
-
-        return f'col("{word}")'
-
-    result = re.sub(r"\b[A-Za-z_][A-Za-z0-9_]*\b", wrap_identifier, result)
-
-    # Restore string literals
-    for key, value in strings.items():
-        result = result.replace(key, value)
-
-    imports.add("from pyspark.sql.functions import col")
-    return result
+    raise ValueError(f"Unsupported expression node {node}")
 
 
-# ══════════════════════════════════════════════════════════════
-# Utility: clean SAS dataset name → Python df variable name
-# WORK.employees_2024  →  df_employees_2024
-# raw.hr_data          →  df_hr_data
-# ══════════════════════════════════════════════════════════════
+# =============================================================
+# run_stage4 (Pipeline Compatible)
+# =============================================================
 
-def df_name(ds: str) -> str:
-    return "df_" + ds.split(".")[-1]
+def run_stage4(ast_nodes):
 
-
-# ══════════════════════════════════════════════════════════════
-# STEP 3 — translate_DataStepNode()
-# ══════════════════════════════════════════════════════════════
-
-def translate_DataStepNode(node: DataStepNode, imports: set) -> str:
-    imports.add("from pyspark.sql.functions import col, when")
-
-    out_df = df_name(node.output_ds)
-    in_df  = df_name(node.input_ds)
-
-    lines = [f"{out_df} = {in_df}"]
-
-    # WHERE → .filter()
-    for condition in node.where:
-        expr = translate_expr(condition, imports)
-        lines.append(f'    .filter(({expr}))')
-
-    # DROP → .drop()
-    for col_name in node.drop:
-        lines.append(f'    .drop("{col_name}")')
-
-    # RENAME → .withColumnRenamed()
-    for old, new in node.rename.items():
-        lines.append(f'    .withColumnRenamed("{old}", "{new}")')
-
-    # Assignments → .withColumn()
-    for assign in node.assignments:
-        rhs = translate_expr(assign.rhs.expr, imports)
-        lines.append(f'    .withColumn("{assign.lhs}", {rhs})')
-
-    # IF/THEN → .withColumn( when().otherwise() )
-    for if_node in node.if_then:
-        if if_node.then_assign:
-            cond = translate_expr(if_node.condition, imports)
-            raw_val = if_node.then_assign.rhs.expr.strip().strip("'\"")
-            val = f'"{raw_val}"'
-            lines.append(
-                f'    .withColumn("{if_node.then_assign.lhs}", '
-                f'when({cond}, {val}).otherwise(None))'
-            )
-            imports.add("from pyspark.sql.functions import when")
-
-    # KEEP → .select()
-    if node.keep:
-        cols_str = ", ".join(f'"{c}"' for c in node.keep)
-        lines.append(f"    .select({cols_str})")
-
-    return " \\\n".join(lines)
-
-
-# ══════════════════════════════════════════════════════════════
-# STEP 4 — translate_ProcSortNode()
-# ══════════════════════════════════════════════════════════════
-
-def translate_ProcSortNode(node: ProcSortNode, imports: set) -> str:
-    imports.add("from pyspark.sql.functions import col")
-
-    out_df = df_name(node.output_ds)
-    in_df  = df_name(node.input_ds)
-
-    order_args = []
-    for bv in node.by_vars:
-        direction = ".desc()" if bv["desc"] else ".asc()"
-        order_args.append(f'col("{bv["col"]}"){direction}')
-
-    lines = [f"{out_df} = {in_df}"]
-    lines.append(f"    .orderBy({', '.join(order_args)})")
-
-    if node.nodupkey:
-        lines.append("    .dropDuplicates()")
-
-    return " \\\n".join(lines)
-
-
-# ══════════════════════════════════════════════════════════════
-# STEP 5 — translate_ProcMeansNode()
-# ══════════════════════════════════════════════════════════════
-
-def translate_ProcMeansNode(node: ProcMeansNode, imports: set) -> str:
-    imports.add("from pyspark.sql import functions as F")
-
-    in_df  = df_name(node.input_ds)
-    out_df = df_name(node.output_ds) if node.output_ds else "df_means_result"
-
-    group_cols = ", ".join(f'"{c}"' for c in node.class_vars)
-
-    STAT_FN = {
-        "mean": "F.mean", "max": "F.max", "min": "F.min",
-        "std":  "F.stddev", "n":  "F.count", "sum": "F.sum",
-    }
-
-    agg_exprs = []
-    for stat, aliases in node.stats.items():
-        fn = STAT_FN.get(stat, f"F.{stat}")
-        for col_name, alias in zip(node.stat_vars, aliases):
-            agg_exprs.append(f'{fn}("{col_name}").alias("{alias}")')
-
-    # Fallback if no OUTPUT statement parsed
-    if not agg_exprs:
-        for col_name in node.stat_vars:
-            agg_exprs.append(f'F.mean("{col_name}").alias("mean_{col_name}")')
-
-    agg_str = ",\n        ".join(agg_exprs)
-
-    return (
-        f"{out_df} = {in_df} \\\n"
-        f"    .groupBy({group_cols}) \\\n"
-        f"    .agg(\n        {agg_str}\n    )"
-    )
-
-
-# ══════════════════════════════════════════════════════════════
-# STEP 6 — translate_ProcSqlNode()
-# ══════════════════════════════════════════════════════════════
-
-def translate_ProcSqlNode(node: ProcSqlNode, imports: set) -> str:
-    imports.add("from pyspark.sql import SparkSession")
-
-    out_df = df_name(node.create_table)
-
-    # Strip WORK. prefix — Spark uses temp view names directly
-    sql = re.sub(r"\bWORK\s*\.\s*", "", node.raw_sql, flags=re.IGNORECASE)
-
-    return (
-        f'{out_df} = spark.sql("""\n'
-        f"    {sql.strip()}\n"
-        f'""")'
-    )
-
-
-# ══════════════════════════════════════════════════════════════
-# STEP 7 — Visitor dispatch + import accumulation
-# ══════════════════════════════════════════════════════════════
-
-def run_stage4(ast_nodes: list):
-    """
-    Walk AST nodes, dispatch to translate_*() methods,
-    accumulate imports, assemble final code string.
-
-    Returns:
-        (pyspark_code: str, todo_count: int)
-    """
-    log.info("=" * 55)
-    log.info("STAGE 4 — Translator")
-    log.info("=" * 55)
-
-    imports    = set()
-    sections   = []
-    todo_count = 0
+    imports = set()
+    sections = []
 
     for node in ast_nodes:
-        node_type = type(node).__name__
-        log.info(f"  Translating: {node_type}")
 
-        try:
-            if isinstance(node, DataStepNode):
-                label = f"DATA STEP → {df_name(node.output_ds)}"
-                code  = translate_DataStepNode(node, imports)
+        if isinstance(node, DataStepNode):
+            out_df = f"df_{node.output_ds}"
+            in_df = f"df_{node.input_ds}"
 
-            elif isinstance(node, ProcSortNode):
-                label = f"PROC SORT → {df_name(node.output_ds)}"
-                code  = translate_ProcSortNode(node, imports)
+            lines = [f"{out_df} = {in_df}"]
 
-            elif isinstance(node, ProcMeansNode):
-                label = f"PROC MEANS → {df_name(node.output_ds) if node.output_ds else 'df_means_result'}"
-                code  = translate_ProcMeansNode(node, imports)
+            for where_expr in node.where:
+                expr = generate_expr(where_expr, imports)
+                lines.append(f"    .filter({expr})")
 
-            elif isinstance(node, ProcSqlNode):
-                label = f"PROC SQL → {df_name(node.create_table)}"
-                code  = translate_ProcSqlNode(node, imports)
+            for assign in node.assignments:
+                rhs = generate_expr(assign.rhs, imports)
+                lines.append(f'    .withColumn("{assign.lhs}", {rhs})')
 
-            else:
-                label = f"UNSUPPORTED: {node_type}"
-                code  = f"# TODO: manual conversion required — {node_type}"
-                todo_count += 1
-                log.warning(f"  No translator for {node_type} — flagged as TODO")
+            for if_node in node.if_then:
+                cond = generate_expr(if_node.condition, imports)
+                then_val = generate_expr(if_node.then_assign.rhs, imports)
 
-            sections.append(f"# ── {label}\n{code}\n")
+                imports.add("from pyspark.sql.functions import when")
 
-        except Exception as e:
-            log.error(f"  Translation error for {node_type}: {e}")
-            sections.append(f"# TODO: translation error in {node_type}: {e}\n")
-            todo_count += 1
+                if if_node.else_assign:
+                    else_val = generate_expr(if_node.else_assign.rhs, imports)
+                    lines.append(
+                        f'.withColumn("{if_node.then_assign.lhs}", '
+                        f'when({cond}, {then_val}).otherwise({else_val}))'
+                    )
+                else:
+                    lines.append(
+                        f'.withColumn("{if_node.then_assign.lhs}", '
+                        f'when({cond}, {then_val}).otherwise(None))'
+                    )
 
-    # STEP 8: assemble — sorted imports first, then body
-    sorted_imports = sorted(imports)
-    output = "\n".join(sorted_imports) + "\n\n" + "\n".join(sections)
+            sections.append(" \\\n".join(lines))
 
-    log.info("=" * 55)
-    log.info(f"Stage 4 complete  |  {len(ast_nodes)} nodes translated  |  {todo_count} TODOs")
-    log.info("=" * 55)
+    final_code = "\n".join(sorted(imports)) + "\n\n" + "\n\n".join(sections)
 
-    return output, todo_count
-
-
-# ══════════════════════════════════════════════════════════════
-# ENTRY POINT
-# ══════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-
-    import sys
-    from pathlib import Path
-    from stage1_preprocessor import run_stage1
-    from stage2_tokenizer import run_stage2
-    from stage3_parser import run_stage3
-
-    if len(sys.argv) != 2:
-        print("\nUsage:")
-        print("  python stage4_translator.py <input_file.sas>\n")
-        sys.exit(1)
-
-    input_sas = sys.argv[1]
-    input_path = Path(input_sas)
-
-    # ── Run Stage 1 ─────────────────────────
-    log.info("Running Stage 1...")
-    stage1_result = run_stage1(input_sas)
-
-    # ── Run Stage 2 ─────────────────────────
-    log.info("Running Stage 2...")
-    token_map = run_stage2(stage1_result.blocks)
-
-    # ── Run Stage 3 ─────────────────────────
-    log.info("Running Stage 3...")
-    ast_nodes = run_stage3(token_map)
-
-    # ── Run Stage 4 ─────────────────────────
-    log.info("Running Stage 4...")
-    pyspark_code, todo_count = run_stage4(ast_nodes)
-
-    print(f"\n{'='*60}")
-    print("  STAGE 4 RESULTS — Raw Generated PySpark Code")
-    print(f"{'='*60}\n")
-    print(pyspark_code)
-
-    # ── Save output next to input file ──────
-    output_path = input_path.parent / f"{input_path.stem}_stage4_raw.py"
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(pyspark_code)
-
-    log.info(f"Raw PySpark saved to: {output_path}")
+    return final_code, 0

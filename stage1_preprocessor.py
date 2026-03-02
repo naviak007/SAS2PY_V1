@@ -85,16 +85,17 @@ def strip_comments(source: str) -> str:
     """
     Remove two types of SAS comments:
       a) Block comments:   /* ... */  (can span multiple lines)
-      b) Line comments:    * text ;   (standalone statement starting with *)
+      b) Star comments:    * text ;   (inline or standalone)
     """
-    # 2a. Block comments  /* ... */
+
+    # 1️⃣ Remove block comments  /* ... */
     result = re.sub(r"/\*.*?\*/", "", source, flags=re.DOTALL)
 
-    # 2b. SAS line comments:  lines where the first non-space token is *
-    #     Must end with ;  — careful not to strip  *varname  expressions
-    result = re.sub(r"(?m)^\s*\*[^;]*;", "", result)
+    # 2️⃣ Remove ALL SAS star comments (* ... ;)
+    # Remove star comments only if they start a new statement
+    result = re.sub(r"(?m)(^|;)\s*\*[^;]*;", r"\1", result)
 
-    # Collapse blank lines left behind
+    # 3️⃣ Collapse excessive blank lines
     result = re.sub(r"\n{3,}", "\n\n", result)
 
     log.info(f"  [Step 2] Comments stripped  ({len(source) - len(result)} chars removed)")
