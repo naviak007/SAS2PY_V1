@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SAS → PySpark Converter</title>
+
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+
+<style>
+
+/* ---------- THEME ---------- */
+
+:root{
+--bg:#0a0c10;
+--surface:#111318;
+--surface2:#181c24;
+--border:#232838;
+--accent:#00e5ff;
+--accent2:#ff6b35;
+--green:#00ffaa;
+--red:#ff4466;
+--yellow:#ffd166;
+--text:#e2e8f4;
+--muted:#5a6480;
+--mono:'JetBrains Mono',monospace;
+--sans:'Syne',sans-serif;
+}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+
+body{
+background:var(--bg);
+color:var(--text);
+font-family:var(--sans);
+min-height:100vh;
+}
+
+/* ---------- HEADER ---------- */
+
+header{
+padding:28px 48px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+border-bottom:1px solid var(--border);
+background:#0a0c10cc;
+backdrop-filter:blur(12px);
+}
+
+.logo{display:flex;align-items:center;gap:14px;}
+
+.logo-icon{
+width:38px;height:38px;
+background:linear-gradient(135deg,var(--accent),var(--accent2));
+border-radius:8px;
+display:flex;align-items:center;justify-content:center;
+font-weight:800;color:#000;
+}
+
+.logo-text span{color:var(--accent);}
+
+/* ---------- LAYOUT ---------- */
+
+main{
+max-width:1200px;
+margin:auto;
+padding:48px;
+}
+
+/* ---------- HERO ---------- */
+
+.hero{text-align:center;margin-bottom:48px;}
+
+.hero h1{
+font-size:3rem;
+font-weight:800;
+}
+
+.hero .sas{color:var(--accent2);}
+.hero .pys{color:var(--accent);}
+
+.hero p{
+margin-top:10px;
+color:var(--muted);
+font-family:var(--mono);
+}
+
+/* ---------- CHAT INPUT ---------- */
+
+
+
+.chat-container textarea{
+width:100%;
+height:200px;
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:12px;
+padding:16px;
+color:var(--text);
+font-family:var(--mono);
+font-size:14px;
+resize:vertical;
+}
+
+/* ---------- CHAT BUBBLES ---------- */
+
+#chat-history{
+display:flex;
+flex-direction:column;
+gap:14px;
+margin-bottom:20px;
+}
+
+.chat-bubble{
+max-width:80%;
+padding:14px 16px;
+border-radius:12px;
+font-family:var(--mono);
+font-size:13px;
+white-space:pre-wrap;
+word-break:break-word;
+}
+
+.chat-user{
+align-self:flex-end;
+background:#1b2c3a;
+border:1px solid #2f4b63;
+color:#9bd4ff;
+}
+
+.chat-ai{
+align-self:flex-start;
+background:#1a3328;
+border:1px solid #2c5c49;
+color:#8ff0c7;
+}
+
+.chat-label{
+font-size:11px;
+font-weight:600;
+margin-bottom:6px;
+opacity:0.7;
+letter-spacing:0.5px;
+}
+
+.chat-text{
+white-space:pre-wrap;
+font-family:var(--mono);
+}
+
+/* ---------- CHAT HISTORY ---------- */
+
+#chat-history{
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:12px;
+padding:16px;
+margin-bottom:16px;
+max-height:300px;
+overflow:auto;
+font-family:var(--mono);
+}
+
+/* ---------- BUTTON ---------- */
+
+.btn-convert{
+margin-top:20px;
+width:100%;
+padding:16px;
+border:none;
+border-radius:10px;
+background:linear-gradient(135deg,var(--accent),#0099bb);
+font-weight:700;
+cursor:pointer;
+}
+
+/* ---------- RESULTS ---------- */
+
+#results{display:none;margin-top:40px;}
+
+.code-compare{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:16px;
+}
+
+.code-pane{
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:12px;
+overflow:hidden;
+}
+
+.pane-header{
+padding:12px;
+border-bottom:1px solid var(--border);
+font-family:var(--mono);
+font-size:12px;
+}
+
+.pane-lines{
+font-family:var(--mono);
+font-size:13px;
+max-height:500px;
+overflow:auto;
+}
+
+.code-line{
+display:flex;
+}
+
+.line-num{
+width:40px;
+text-align:right;
+padding-right:10px;
+color:var(--muted);
+}
+
+.line-content{
+flex:1;
+white-space:pre;
+}
+
+.download-bar{
+margin-top:20px;
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:16px;
+border:1px solid var(--border);
+border-radius:10px;
+background:var(--surface);
+}
+
+.btn-download{
+border:1px solid var(--accent);
+padding:8px 20px;
+border-radius:8px;
+color:var(--accent);
+text-decoration:none;
+}
+
+</style>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+</head>
+
+<body>
+
+<header>
+<div class="logo">
+<div class="logo-icon">S→P</div>
+<div class="logo-text"><span>SAS</span> to PySpark</div>
+</div>
+</header>
+
+<main>
+
+<div class="hero">
+<h1><span class="sas">SAS</span> → <span class="pys">PySpark</span></h1>
+<p>Paste SAS code → Convert → Review PySpark</p>
+</div>
+
+<div id="chat-history"></div>
+
+<div id="upload-zone" style="
+border:2px dashed var(--border);
+border-radius:12px;
+padding:24px;
+margin-bottom:16px;
+text-align:center;
+color:var(--muted);
+cursor:pointer;
+">
+Drop a .sas file here or click to upload
+<input type="file" id="sas-file" accept=".sas" style="display:none">
+</div>
+
+<div class="chat-container">
+<textarea id="sas-input" placeholder="Paste your SAS code here..."></textarea>
+</div>
+
+<button class="btn-convert" id="btn-convert">
+⚡ Convert with Ignis Flow
+</button>
+
+<div id="results">
+
+<div class="code-compare">
+
+<div class="code-pane">
+<div class="pane-header">SAS Input</div>
+<div class="pane-lines" id="sas-pane"></div>
+</div>
+
+<div class="code-pane">
+<div class="pane-header">PySpark Output</div>
+<div id="py-editor" style="height:500px;"></div>
+</div>
+
+</div>
+
+<div class="download-bar">
+
+<div id="dl-meta"></div>
+
+<a id="btn-download" class="btn-download">Download</a>
+
+</div>
+
+</div>
+
+</main>
+
+<script>
+
+function preprocessSAS(code){
+
+return code
+.split("\n")
+.map(line => line.trimEnd())        // remove trailing spaces
+.filter(line => line.trim() !== "") // remove empty lines
+.join("\n")
+
+}
+
+
+/* ---------- STATE ---------- */
+let editor;
+let sasContent="";
+let pyContent="";
+
+/* ---------- CONVERT BUTTON ---------- */
+document.getElementById("btn-convert").onclick = async () => {
+
+const btn = document.getElementById("btn-convert");
+
+const rawInput = document.getElementById("sas-input").value;
+
+const sasInput = preprocessSAS(rawInput);
+
+if(!sasInput){
+alert("Paste SAS code first");
+return;
+}
+
+sasContent = sasInput;
+
+addChat("user",sasContent);
+
+try{
+
+btn.innerHTML = "⚙️ Converting...";
+btn.disabled = true;
+
+const result = await callIgnisFlow();
+
+pyContent =
+result.outputs?.[0]?.outputs?.[0]?.results?.message?.text || "";
+
+addChat("ai",pyContent);
+
+renderComparison(sasContent, pyContent);
+
+document.getElementById("results").style.display="block";
+
+}catch(err){
+
+alert("Conversion failed: " + err.message);
+
+} finally {
+
+btn.innerText = "⚡ Convert with Ignis Flow";
+btn.disabled = false;
+
+}
+
+};
+/* ---------- API ---------- */
+
+async function callIgnisFlow(){
+
+const sasContent = document.getElementById("sas-input").value;
+
+const response = await fetch("http://127.0.0.1:5000/convert",{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:JSON.stringify({
+sas:sasContent
+})
+});
+
+if(!response.ok){
+throw new Error(await response.text());
+}
+
+return await response.json();
+}
+
+/* ---------- CHAT HISTORY ---------- */
+
+function addChat(type, text){
+
+const bubble = document.createElement("div");
+
+bubble.classList.add("chat-bubble");
+
+if(type === "user"){
+bubble.classList.add("chat-user");
+} else {
+bubble.classList.add("chat-ai");
+}
+
+bubble.innerHTML =
+`<div class="chat-label">${type === "user" ? "You" : "Converter"}</div>
+<div class="chat-text">${escapeHtml(text)}</div>`;
+
+document.getElementById("chat-history").appendChild(bubble);
+
+/* auto scroll */
+const chat = document.getElementById("chat-history");
+chat.scrollTop = chat.scrollHeight;
+
+}
+
+/* ---------- CODE VIEW ---------- */
+
+function renderComparison(sas,py){
+
+renderLines("sas-pane", sas.split("\n"));
+
+if(editor){
+editor.setValue(py);
+}
+
+}
+
+function renderLines(id,lines){
+
+const el=document.getElementById(id);
+
+el.innerHTML=lines.map((l,i)=>
+
+`<div class="code-line">
+<span class="line-num">${i+1}</span>
+<span class="line-content">${escapeHtml(l)}</span>
+</div>`
+
+).join("");
+
+}
+
+/* ---------- DOWNLOAD BUTTON ---------- */
+
+document.getElementById("btn-download").onclick = function(){
+
+const code = editor.getValue();
+
+const blob = new Blob([code], {type:"text/plain"});
+
+const url = URL.createObjectURL(blob);
+
+this.href = url;
+
+this.download = "converted_pyspark.py";
+
+};
+
+/* ---------- HELPERS ---------- */
+
+function escapeHtml(s){
+
+return s.replace(/[&<>"]/g,function(c){
+
+return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];
+
+});
+
+}
+
+const uploadZone = document.getElementById("upload-zone");
+const fileInput = document.getElementById("sas-file");
+const sasTextarea = document.getElementById("sas-input");
+
+/* click to upload */
+uploadZone.onclick = () => fileInput.click();
+
+/* file picker */
+fileInput.onchange = async (e) => {
+const file = e.target.files[0];
+if(!file) return;
+
+if(!file.name.endsWith(".sas")){
+alert("Please upload a .sas file");
+return;
+}
+
+const text = await file.text();
+sasTextarea.value = text;
+};
+
+/* drag over */
+uploadZone.addEventListener("dragover", (e)=>{
+e.preventDefault();
+uploadZone.style.borderColor = "var(--accent)";
+});
+
+/* drag leave */
+uploadZone.addEventListener("dragleave", ()=>{
+uploadZone.style.borderColor = "var(--border)";
+});
+
+/* drop file */
+uploadZone.addEventListener("drop", async (e)=>{
+e.preventDefault();
+
+uploadZone.style.borderColor = "var(--border)";
+
+const file = e.dataTransfer.files[0];
+if(!file) return;
+
+if(!file.name.endsWith(".sas")){
+alert("Please drop a .sas file");
+return;
+}
+
+const text = await file.text();
+sasTextarea.value = text;
+});
+
+require.config({
+paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }
+});
+
+require(["vs/editor/editor.main"], function () {
+
+editor = monaco.editor.create(document.getElementById("py-editor"), {
+value: "",
+language: "python",
+theme: "vs-dark",
+automaticLayout: true,
+fontSize: 13,
+minimap: { enabled: false }
+});
+
+editor.onDidChangeModelContent(() => {
+
+const code = editor.getValue();
+
+document.getElementById("dl-meta").textContent =
+code.split("\n").length + " lines";
+
+});
+
+});
+
+</script>
+
+</body>
+</html>

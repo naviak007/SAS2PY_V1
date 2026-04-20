@@ -1,0 +1,111 @@
+body{
+font-family: Arial;
+background:#f3f4f6;
+margin:0;
+}
+
+.container{
+max-width:1400px;
+margin:auto;
+padding:20px;
+}
+
+h1{
+margin-bottom:15px;
+}
+
+/* CHAT */
+
+.chat-section{
+background:white;
+border-radius:8px;
+border:1px solid #ddd;
+padding:15px;
+}
+
+.chat-box{
+height:250px;
+overflow-y:auto;
+border:1px solid #ddd;
+border-radius:6px;
+padding:10px;
+margin-bottom:10px;
+background:#fafafa;
+}
+
+.message{
+padding:8px 10px;
+margin-bottom:8px;
+border-radius:6px;
+position:relative;
+max-width:75%;
+}
+
+.user{
+background:#dbeafe;
+margin-left:auto;
+}
+
+.bot{
+background:#e5e7eb;
+}
+
+.copy-btn{
+position:absolute;
+right:5px;
+top:5px;
+font-size:11px;
+cursor:pointer;
+}
+
+.chat-input-row{
+display:flex;
+gap:10px;
+}
+
+#chatInput{
+flex:1;
+padding:8px;
+border-radius:5px;
+border:1px solid #ccc;
+}
+
+button{
+padding:8px 14px;
+border:none;
+border-radius:5px;
+background:#2563eb;
+color:white;
+cursor:pointer;
+}
+
+button:hover{
+background:#1e40af;
+}
+
+
+/* EDITORS */
+
+.editor-section{
+display:flex;
+gap:20px;
+margin-top:20px;
+}
+
+.editor-column{
+flex:1;
+background:white;
+padding:10px;
+border-radius:8px;
+border:1px solid #ddd;
+}
+
+.editor{
+height:350px;
+border:1px solid #ccc;
+margin-top:8px;
+}
+
+.button-row{
+margin-top:10px;
+}

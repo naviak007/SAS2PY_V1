@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SAS → PySpark Migration Tool</title>
+
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono&family=Syne:wght@600;800&display=swap" rel="stylesheet"/>
+
+<style>
+:root{
+--bg:#0a0c10;
+--surface:#111318;
+--border:#232838;
+--accent:#00e5ff;
+--accent2:#ff6b35;
+--text:#e2e8f4;
+--muted:#5a6480;
+}
+
+body{
+margin:0;
+background:var(--bg);
+color:var(--text);
+font-family:'Syne',sans-serif;
+}
+
+main{
+max-width:1200px;
+margin:auto;
+padding:40px;
+}
+
+h1{
+text-align:center;
+margin-bottom:25px;
+}
+
+textarea{
+width:100%;
+height:200px;
+background:var(--surface);
+border:1px solid var(--border);
+border-radius:10px;
+padding:14px;
+color:var(--text);
+font-family:'JetBrains Mono',monospace;
+}
+
+.actions{
+display:flex;
+gap:10px;
+margin-top:12px;
+}
+
+button{
+flex:1;
+padding:12px;
+border:none;
+border-radius:8px;
+cursor:pointer;
+font-weight:bold;
+background:linear-gradient(135deg,var(--accent),#0099bb);
+}
+
+.secondary{
+background:linear-gradient(135deg,var(--accent2),#ff8a50);
+}
+
+.block{
+margin-top:25px;
+padding:15px;
+border:1px solid var(--border);
+border-radius:12px;
+background:var(--surface);
+}
+
+.grid{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:12px;
+}
+
+.code-box{
+background:#0f1218;
+border:1px solid var(--border);
+border-radius:8px;
+padding:10px;
+font-family:'JetBrains Mono',monospace;
+font-size:13px;
+max-height:250px;
+overflow:auto;
+}
+
+.loading{
+text-align:center;
+margin-top:20px;
+color:var(--muted);
+}
+
+.error{
+color:#ff4466;
+margin-top:10px;
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
+</head>
+
+<body>
+
+<main>
+
+<h1>SAS → PySpark Migration Tool</h1>
+
+<textarea id="sas-input" placeholder="Paste SAS code here..."></textarea>
+
+<div class="actions">
+<button onclick="convertAll()">Convert</button>
+<button class="secondary" onclick="combineAll()">Download Output</button>
+</div>
+
+<div id="status" class="loading"></div>
+
+<div id="blocks-container"></div>
+
+<h2>Final PySpark Output</h2>
+<div id="final-editor" style="height:400px;"></div>
+
+</main>
+
+<script>
+
+let blocksData = []
+let finalEditor = null
+let editors = {}
+
+require.config({
+paths:{vs:"https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs"}
+})
+
+require(["vs/editor/editor.main"], function(){
+finalEditor = monaco.editor.create(document.getElementById("final-editor"),{
+value:"",
+language:"python",
+theme:"vs-dark",
+automaticLayout:true
+})
+})
+
+async function convertAll(){
+
+const sas = document.getElementById("sas-input").value
+
+if(!sas){
+alert("Paste SAS code")
+return
+}
+
+document.getElementById("status").innerText = "⚙️ Processing..."
+document.getElementById("blocks-container").innerHTML = ""
+
+try{
+
+const res = await fetch("http://127.0.0.1:5000/convert",{
+method:"POST",
+headers:{ "Content-Type":"application/json" },
+body: JSON.stringify({ sas })
+})
+
+if(!res.ok){
+throw new Error(await res.text())
+}
+
+const data = await res.json()
+
+blocksData = data.blocks || []
+
+await new Promise(r => setTimeout(r, 50))
+
+renderBlocks(blocksData)
+
+document.getElementById("status").innerText = `✅ ${blocksData.length} blocks processed`
+
+}catch(err){
+
+document.getElementById("status").innerHTML = `<div class="error">❌ ${err.message}</div>`
+
+}
+
+}
+
+function renderBlocks(blocks){
+
+const container = document.getElementById("blocks-container")
+container.innerHTML=""
+
+blocks.forEach((b,i)=>{
+
+const div=document.createElement("div")
+div.className="block"
+
+div.innerHTML=`
+<h3>Block ${i+1} (${b.status})</h3>
+
+<div class="grid">
+
+<div>
+  <div style="font-size:12px;color:#888;margin-bottom:4px;">SAS</div>
+  <div id="sas-editor-${i}" style="height:250px;"></div>
+</div>
+
+<div>
+  <div style="font-size:12px;color:#888;margin-bottom:4px;">PySpark</div>
+  <div id="editor-${i}" style="height:250px;"></div>
+</div>
+
+</div>
+
+<button onclick="retryBlock(${i})">Retry Block</button>
+`
+
+container.appendChild(div)
+
+/* create both editors */
+setTimeout(()=>{
+createEditor(`sas-editor-${i}`, b.sas, "sql")   
+createEditor(`editor-${i}`, b.pyspark, "python") 
+},0)
+
+})
+}
+function createEditor(id, value, lang){
+
+const ed = monaco.editor.create(document.getElementById(id),{
+value:value || "",
+language: lang || "plaintext",
+theme:"vs-dark",
+automaticLayout:true,
+fontSize:13,
+lineNumbers:"on",
+minimap:{enabled:false},
+scrollBeyondLastLine:false,
+wordWrap:"on"
+})
+
+window[id]=ed
+}
+
+async function retryBlock(i){
+
+document.getElementById("status").innerText = `🔁 Retrying block ${i+1}...`
+
+const block = blocksData[i].sas
+
+const res = await fetch("http://127.0.0.1:5000/retry",{
+method:"POST",
+headers:{ "Content-Type":"application/json" },
+body: JSON.stringify({ block })
+})
+
+const data = await res.json()
+
+blocksData[i].pyspark = data.pyspark
+
+const editorId = `editor-${i}`
+
+if(editors[editorId]){
+editors[editorId].setValue(data.pyspark)
+}
+
+document.getElementById("status").innerText = `✅ Block ${i+1} updated`
+}
+
+function combineAll(){
+
+if(!blocksData.length){
+alert("Nothing to combine")
+return
+}
+
+const final = blocksData.map(b => b.pyspark).join("\n\n")
+
+if(finalEditor){
+finalEditor.setValue(final)
+}
+
+const blob = new Blob([final], {type:"text/plain"})
+const a = document.createElement("a")
+
+a.href = URL.createObjectURL(blob)
+a.download = "converted_pyspark.py"
+a.click()
+
+}
+
+function escapeHtml(s){
+return s.replace(/[&<>"]/g,c=>({
+"&":"&amp;",
+"<":"&lt;",
+">":"&gt;",
+'"':"&quot;"
+}[c]))
+}
+
+</script>
+
+</body>
+</html>

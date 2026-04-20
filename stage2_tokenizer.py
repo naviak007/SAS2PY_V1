@@ -77,8 +77,9 @@ MASTER_PATTERN = re.compile(
     |
     (?P<OPERATOR>                       # --- Operators (multi-char FIRST) ---
         >=|<=|\^=|¬=|~=                 #   multi-char comparison
+      | [+\-*/]                         #   arithmetic operators
       | [=<>]                           #   single-char comparison
-      | \b(?:NE|LE|LT|GE|GT|EQ|AND|OR|NOT|IN)\b  # word operators
+      | \b(?:NE|LE|LT|GE|GT|EQ|AND|OR|NOT|IN|BETWEEN)\b  # word operators
     )
     |
     (?P<WORD>                           # --- Words (keyword or identifier) ---
