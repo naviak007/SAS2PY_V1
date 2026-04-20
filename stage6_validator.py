@@ -195,8 +195,10 @@ if __name__ == "__main__":
     # ── Stage 2
     token_map = run_stage2(stage1_result.blocks)
 
-    # ── Stage 3
+    # Stage 3
+    log.info("Running Stage 3...")
     ast_nodes = run_stage3(token_map)
+    log.info(f"Stage 3 produced {len(ast_nodes)} AST nodes")
 
     # ── Stage 4
     raw_code, todo_count = run_stage4(ast_nodes)

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<meta charset="UTF-8">
+<title>SAS → PySpark Migration Tool</title>
+
+<link rel="stylesheet" href="styles.css">
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>SAS → PySpark Migration Tool</h1>
+
+<!-- CHAT AREA -->
+
+<div class="chat-section">
+
+<div id="chat" class="chat-box"></div>
+
+<div class="chat-input-row">
+
+<input
+id="chatInput"
+placeholder="Ask the bot or paste SAS code..."
+/>
+
+<button id="sendBtn">Send</button>
+
+</div>
+
+</div>
+
+
+<!-- EDITORS -->
+
+<div class="editor-section">
+
+<div class="editor-column">
+
+<h3>SAS Code</h3>
+
+<div id="sasEditor" class="editor"></div>
+
+<div class="button-row">
+
+<button id="downloadSasBtn">Download .sas</button>
+<button id="convertBtn">Convert to PySpark</button>
+
+</div>
+
+</div>
+
+
+<div class="editor-column">
+
+<h3>PySpark Code</h3>
+
+<div id="pyEditor" class="editor"></div>
+
+<div class="button-row">
+
+<button id="downloadPyBtn">Download .py</button>
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>

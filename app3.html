@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>SAS → PySpark</title>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
+<style>
+body { background:#0a0c10; color:white; font-family:sans-serif; padding:20px; }
+textarea { width:100%; height:200px; }
+.block { margin-top:20px; background:#111; padding:10px; }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+</style>
+</head>
+
+<body>
+
+<h1>SAS → PySpark</h1>
+
+<textarea id="sas-input"></textarea>
+<button onclick="convertAll()">Convert</button>
+
+<div id="status"></div>
+<div id="progress-bar"></div>
+
+<div id="blocks"></div>
+
+<h2>Final Output</h2>
+<div id="final" style="height:300px;"></div>
+
+<script>
+
+let blocksData = []
+let editors = {}
+let finalEditor
+let progressInterval
+
+require.config({
+  paths:{vs:"https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs"}
+})
+
+require(["vs/editor/editor.main"], function(){
+  finalEditor = monaco.editor.create(document.getElementById("final"),{
+    value:"",
+    language:"python",
+    theme:"vs-dark"
+  })
+})
+
+
+function startProgressTracking(){
+
+  progressInterval = setInterval(async () => {
+
+    const res = await fetch("http://127.0.0.1:5000/progress")
+    const data = await res.json()
+
+    const { current, total } = data
+
+    if(total > 0){
+
+      document.getElementById("status").innerText =
+        `Processing ${current}/${total}`
+
+      const percent = Math.round((current/total)*100)
+
+      document.getElementById("progress-bar").innerHTML =
+        `<div style="background:#333;height:10px;">
+           <div style="width:${percent}%;background:#00e5ff;height:10px;"></div>
+         </div>`
+    }
+
+    if(current === total && total !== 0){
+      clearInterval(progressInterval)
+    }
+
+  }, 500)
+}
+
+
+async function convertAll(){
+
+  const sas = document.getElementById("sas-input").value
+
+  if(!sas){
+    alert("Paste SAS code")
+    return
+  }
+
+  startProgressTracking()
+
+  const res = await fetch("http://127.0.0.1:5000/convert",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ sas })
+  })
+
+  const data = await res.json()
+
+  blocksData = data.blocks
+
+  renderBlocks()
+}
+
+
+function renderBlocks(){
+
+  const container = document.getElementById("blocks")
+  container.innerHTML = ""
+
+  blocksData.forEach((b,i)=>{
+
+    const div = document.createElement("div")
+    div.className = "block"
+
+    div.innerHTML = `
+      <h3>Block ${i+1}</h3>
+      <div class="grid">
+        <div id="sas-${i}" style="height:200px;"></div>
+        <div id="py-${i}" style="height:200px;"></div>
+      </div>
+      <button onclick="retryBlock(${i})">Retry</button>
+    `
+
+    container.appendChild(div)
+
+    setTimeout(()=>{
+      editors[`sas-${i}`] = monaco.editor.create(
+        document.getElementById(`sas-${i}`),
+        { value: b.sas, language:"sql", theme:"vs-dark" }
+      )
+
+      editors[`py-${i}`] = monaco.editor.create(
+        document.getElementById(`py-${i}`),
+        { value: b.pyspark, language:"python", theme:"vs-dark" }
+      )
+    },0)
+
+  })
+
+  combineAll()
+}
+
+
+function combineAll(){
+  const final = blocksData.map(b => b.pyspark).join("\n\n")
+  finalEditor.setValue(final)
+}
+
+
+async function retryBlock(i){
+
+  const updatedSas = editors[`sas-${i}`].getValue()
+
+  const res = await fetch("http://127.0.0.1:5000/retry",{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ block: updatedSas })
+  })
+
+  const data = await res.json()
+
+  blocksData[i].sas = updatedSas
+  blocksData[i].pyspark = data.pyspark
+
+  editors[`py-${i}`].setValue(data.pyspark)
+
+  combineAll()
+}
+
+</script>
+
+</body>
+</html>
