@@ -38,8 +38,8 @@ def extract_pyspark(result):
     return match.group(1).strip() if match else text
 
 
-input_folder = r"SAS2PY_V1\sasCodeSourceFolder"
-output_folder = r"SAS2PY_V1\pythonCodeDestinationFolder"
+input_folder = "C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\sasCodeSourceFolder"
+output_folder = "C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\pythonCodeDestinationFolder"
 
 # Ensure output folder exists
 os.makedirs(output_folder, exist_ok=True)
