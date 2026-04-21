@@ -3,8 +3,9 @@ import uuid
 import re
 import os
 
-FLOW_URL = "https://ignisflow.infogain.com/api/v1/run/da5175f4-c20e-4dba-a373-5336abf9fead"
 API_KEY = "sk-7UFeDwZu8Uqn3BQ2JkYaJm7TAmShweqZQvlYtcQyhlw"
+FLOW_URL = "https://ignisflow.infogain.com/api/v1/run/da5175f4-c20e-4dba-a373-5336abf9fead"
+
 
 def call_api(sas_code):
     payload = {
@@ -38,8 +39,8 @@ def extract_pyspark(result):
     return match.group(1).strip() if match else text
 
 
-input_folder = "C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\sasCodeSourceFolder"
-output_folder = "C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\pythonCodeDestinationFolder"
+input_folder = r"C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\sasCodeSourceFolder"
+output_folder = r"C:\Users\Naviak\OneDrive - Infogain India Private Limited\Desktop\Sas2PYMain\SAS2PY_V1\pythonCodeDestinationFolder"
 
 # Ensure output folder exists
 os.makedirs(output_folder, exist_ok=True)
